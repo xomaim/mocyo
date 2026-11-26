@@ -115,6 +115,7 @@ async function openai(p, system, history, on) {
         if (tc.id) calls[i].id = tc.id;
         if (tc.function?.name) calls[i].name += tc.function.name;
         if (tc.function?.arguments) calls[i].argStr += tc.function.arguments;
+        on.tool(calls[i].name, calls[i].argStr);
       }
     }
   );
@@ -168,7 +169,7 @@ async function anthropic(p, system, history, on) {
         const d = ev.delta;
         if (d.type === 'text_delta') { text += d.text; on.text(d.text); }
         else if (d.type === 'thinking_delta') on.think(d.thinking);
-        else if (d.type === 'input_json_delta' && blocks[ev.index]) blocks[ev.index].argStr += d.partial_json;
+        else if (d.type === 'input_json_delta' && blocks[ev.index]) { blocks[ev.index].argStr += d.partial_json; on.tool(blocks[ev.index].name, blocks[ev.index].argStr); }
       }
     }
   );
@@ -209,6 +210,6 @@ export async function probe(p, { stream: st, tools }, ms = 30000) {
 
 export function chat(p, system, history, on = {}) {
   if (!p.key) throw new Error(`No API key for ${p.name}. Use /key <your-key> or set ${p.env}.`);
-  const handlers = { text: on.text || (() => {}), think: on.think || (() => {}) };
+  const handlers = { text: on.text || (() => {}), think: on.think || (() => {}), tool: on.tool || (() => {}) };
   return p.kind === 'anthropic' ? anthropic(p, system, history, handlers) : openai(p, system, history, handlers);
 }

@@ -61,10 +61,21 @@ async function turn(input) {
   const p = config.resolve(cfg);
   for (let step = 0; step < 25; step++) {
     let stop = spinner(`waiting for ${p.name}/${p.model}  (Ctrl+C to cancel)`);
-    let mode = null; // 'think' | 'text'
+    let mode = null; // 'think' | 'text' | 'tool'
+    let lastDraw = 0;
     const first = () => { if (stop) { stop(); stop = null; } };
     const on = {
       think: (d) => { first(); if (mode !== 'think') { process.stdout.write(dim('\n  thinking… ')); mode = 'think'; } process.stdout.write(dim(d)); },
+      tool: (name, argStr) => {
+        first();
+        const now = Date.now();
+        if (!process.stdout.isTTY || now - lastDraw < 200) return; // redraw at most 5x/sec
+        lastDraw = now;
+        if (mode !== 'tool') { process.stdout.write(mode ? '\n' : ''); mode = 'tool'; }
+        const file = (argStr.match(/"path"\s*:\s*"([^"]+)"/) || [])[1];
+        const kb = (argStr.length / 1024).toFixed(1);
+        process.stdout.write('\r\x1b[K' + magenta(`  ✎ preparing ${name || 'tool'}${file ? ' ' + file : ''}… ${kb} KB`));
+      },
       text: (d) => { first(); if (mode !== 'text') { process.stdout.write(mode ? '\n\n' : '\n'); mode = 'text'; } process.stdout.write(d); },
     };
     busy = true;
@@ -80,7 +91,8 @@ async function turn(input) {
       return;
     }
     first(); busy = false;
-    if (mode) process.stdout.write('\n\n');
+    if (mode === 'tool') { if (process.stdout.isTTY) process.stdout.write('\r\x1b[K'); }
+    else if (mode) process.stdout.write('\n\n');
     showApi(r.entry);
     history.push({ role: 'assistant', text: r.text, calls: r.calls });
     if (!r.calls.length) return;
