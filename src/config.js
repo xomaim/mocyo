@@ -11,7 +11,7 @@ export const PROVIDERS = {
   openrouter: { kind: 'openai',    base: 'https://openrouter.ai/api/v1',     env: 'OPENROUTER_API_KEY', model: 'openai/gpt-4o-mini' },
   groq:       { kind: 'openai',    base: 'https://api.groq.com/openai/v1',   env: 'GROQ_API_KEY',       model: 'llama-3.3-70b-versatile' },
   deepseek:   { kind: 'openai',    base: 'https://api.deepseek.com/v1',      env: 'DEEPSEEK_API_KEY',   model: 'deepseek-chat' },
-  nvidia:     { kind: 'openai',    base: 'https://integrate.api.nvidia.com/v1', env: 'NVIDIA_API_KEY', model: 'moonshotai/kimi-k3.1-pro' },
+  nvidia:     { kind: 'openai',    base: 'https://integrate.api.nvidia.com/v1', env: 'NVIDIA_API_KEY', model: 'minimaxai/minimax-m3.1-flash' },
   gemini:     { kind: 'openai',    base: 'https://generativelanguage.googleapis.com/v1beta/openai', env: 'GEMINI_API_KEY', model: 'gemini-2.0-flash' },
 };
 
