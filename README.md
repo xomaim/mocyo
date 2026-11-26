@@ -31,12 +31,12 @@ Mac and Linux builds are on the [releases page](https://github.com/xomaim/mocyo/
 
 ```
 mocyo.exe
-› /provider openai          # or anthropic, openrouter, groq, deepseek, gemini
+› /provider openai          # or anthropic, openrouter, groq, deepseek, gemini, nvidia
 › /key sk-...               # saved to ~/.mocyo/config.json
 › /model gpt-4o             # optional
 ```
 
-You can also set environment variables instead: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`.
+You can also set environment variables instead: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`.
 
 For any other OpenAI-compatible API, use `/base https://your-api/v1`.
 
