@@ -1,0 +1,30 @@
+name: Build mocyo.exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Build executables
+        run: |
+          mkdir -p dist
+          bun build bin/mocyo.js --compile --minify --target=bun-windows-x64 --outfile dist/mocyo.exe
+          bun build bin/mocyo.js --compile --minify --target=bun-linux-x64 --outfile dist/mocyo-linux
+          bun build bin/mocyo.js --compile --minify --target=bun-darwin-arm64 --outfile dist/mocyo-mac
+      - name: Publish to "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: mocyo (latest build)
+          body: "Download **mocyo.exe**, put it in your project folder (or on your PATH), and run it. No install needed."
+          make_latest: true
+          files: dist/*

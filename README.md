@@ -2,9 +2,9 @@
 
 A lightweight AI coding agent for your terminal, like opencode.
 
-- **API-only.** Nothing runs on your machine except a small Node script. The model runs at the provider.
+- **API-only.** Nothing runs on your machine except one small program. The model runs at the provider.
 - **Shows every API call.** After each request you see the status, host, time and token counts. `/api` lists all calls, and `/api 3` shows the full request and response JSON for call 3.
-- **Light on your PC.** No dependencies, no Python, no background processes. It sits idle while it waits for you.
+- **Light on your PC.** No dependencies, a single small .exe, no background processes. It sits idle while it waits for you.
 
 ```
 › add a dark mode toggle to index.html
@@ -17,20 +17,20 @@ A lightweight AI coding agent for your terminal, like opencode.
 
 ## Install
 
-Needs Node.js 18 or newer.
+**Windows:** download **[mocyo.exe](https://github.com/xomaim/mocyo/releases/latest/download/mocyo.exe)**, then run it from a terminal in your project folder:
 
-```bash
-git clone https://github.com/xomaim/mocyo
-cd mocyo
-npm link        # now `mocyo` works from any folder
+```
+mocyo.exe
 ```
 
-Or run it without installing: `node bin/mocyo.js`
+No Node.js or anything else needed. GitHub builds the .exe automatically every time the code changes (see the Actions tab).
+
+Mac and Linux builds are on the [releases page](https://github.com/xomaim/mocyo/releases/latest) too.
 
 ## Setup
 
 ```
-mocyo
+mocyo.exe
 › /provider openai          # or anthropic, openrouter, groq, deepseek, gemini
 › /key sk-...               # saved to ~/.mocyo/config.json
 › /model gpt-4o             # optional
@@ -42,7 +42,7 @@ For any other OpenAI-compatible API, use `/base https://your-api/v1`.
 
 ## Usage
 
-Run `mocyo` inside your project folder and type what you want done. For a single question, pass it as an argument: `mocyo "explain this repo"`.
+Run `mocyo.exe` inside your project folder and type what you want done. For a single question, pass it as an argument: `mocyo.exe "explain this repo"`.
 
 | Command | What it does |
 |---|---|
