@@ -1,32 +1,81 @@
-// Talks to AI providers over plain HTTPS (built-in fetch). Every call is logged.
+// Talks to AI providers over plain HTTPS (built-in fetch), streaming replies. Every call is logged.
 import { TOOLS, schema } from './tools.js';
 
 export const apiLog = []; // { method, url, status, ms, inTok, outTok, request, response }
+export const IDLE_TIMEOUT_MS = 90_000; // give up if the API sends nothing for this long
 
-async function call(url, headers, body) {
+let current = null; // AbortController of the in-flight request
+export function cancel() { if (current) { current.abort(new Error('cancelled')); return true; } return false; }
+
+// POST and stream Server-Sent Events. onEvent(obj) is called for each JSON "data:" line.
+async function stream(url, headers, body, onEvent) {
   const t0 = Date.now();
   const entry = { method: 'POST', url, status: 0, ms: 0, inTok: 0, outTok: 0, request: body, response: null };
   apiLog.push(entry);
   if (apiLog.length > 50) apiLog.shift();
-  let res, json;
+
+  const ac = new AbortController();
+  current = ac;
+  let idle;
+  const kick = () => {
+    clearTimeout(idle);
+    idle = setTimeout(() => ac.abort(new Error(`no response for ${IDLE_TIMEOUT_MS / 1000}s, timed out`)), IDLE_TIMEOUT_MS);
+  };
+  const fail = (msg) => { entry.ms = Date.now() - t0; entry.response ??= { error: msg }; throw new Error(msg); };
+
   try {
-    res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
-    const text = await res.text();
-    try { json = JSON.parse(text); } catch { json = { raw: text }; }
-  } catch (e) {
+    kick();
+    let res;
+    try {
+      res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), signal: ac.signal });
+    } catch (e) { fail(ac.signal.aborted ? String(ac.signal.reason?.message || 'cancelled') : `Network error: ${e.message}`); }
+    entry.status = res.status;
+
+    if (!res.ok) {
+      const text = await res.text();
+      let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
+      entry.response = json;
+      fail(`API ${res.status}: ${json?.error?.message || json?.detail || json?.raw || JSON.stringify(json)}`);
+    }
+
+    const events = [];
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        kick();
+        buf += dec.decode(value, { stream: true });
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line.startsWith('data:')) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === '[DONE]') continue;
+          let obj; try { obj = JSON.parse(data); } catch { continue; }
+          if (obj.error) { entry.response = obj; fail(`API error: ${obj.error.message || JSON.stringify(obj.error)}`); }
+          if (events.length < 400) events.push(obj);
+          onEvent(obj);
+        }
+      }
+    } catch (e) {
+      if (ac.signal.aborted) fail(String(ac.signal.reason?.message || 'cancelled'));
+      throw e;
+    }
     entry.ms = Date.now() - t0;
-    entry.response = { error: String(e.message || e) };
-    throw new Error(`Network error: ${e.message}`);
+    entry.response = { streamed_events: events.length, events };
+    return entry;
+  } finally {
+    clearTimeout(idle);
+    if (current === ac) current = null;
   }
-  entry.status = res.status;
-  entry.ms = Date.now() - t0;
-  entry.response = json;
-  if (!res.ok) throw new Error(`API ${res.status}: ${json?.error?.message || json?.raw || JSON.stringify(json)}`);
-  return { json, entry };
 }
 
-// ---- OpenAI-compatible (OpenAI, OpenRouter, Groq, DeepSeek, Gemini...) ----
-async function openai(p, system, history) {
+// ---- OpenAI-compatible (OpenAI, OpenRouter, Groq, DeepSeek, Gemini, NVIDIA...) ----
+async function openai(p, system, history, on) {
   const messages = [{ role: 'system', content: system }];
   for (const m of history) {
     if (m.role === 'user') messages.push({ role: 'user', content: m.text });
@@ -40,31 +89,50 @@ async function openai(p, system, history) {
       });
     else if (m.role === 'tool') messages.push({ role: 'tool', tool_call_id: m.id, content: m.text });
   }
-  const { json, entry } = await call(
+  let text = '';
+  const calls = [];
+  let usage = null;
+  const entry = await stream(
     `${p.base}/chat/completions`,
-    { authorization: `Bearer ${p.key}` },
+    { authorization: `Bearer ${p.key}`, accept: 'text/event-stream' },
     {
       model: p.model,
       messages,
+      stream: true,
+      stream_options: { include_usage: true },
       tools: TOOLS.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: schema(t) } })),
+    },
+    (ev) => {
+      if (ev.usage) usage = ev.usage;
+      const d = ev.choices?.[0]?.delta;
+      if (!d) return;
+      const think = d.reasoning_content || d.reasoning;
+      if (think) on.think(think);
+      if (d.content) { text += d.content; on.text(d.content); }
+      for (const tc of d.tool_calls || []) {
+        const i = tc.index ?? calls.length;
+        calls[i] ??= { id: '', name: '', argStr: '' };
+        if (tc.id) calls[i].id = tc.id;
+        if (tc.function?.name) calls[i].name += tc.function.name;
+        if (tc.function?.arguments) calls[i].argStr += tc.function.arguments;
+      }
     }
   );
-  entry.inTok = json.usage?.prompt_tokens || 0;
-  entry.outTok = json.usage?.completion_tokens || 0;
-  const msg = json.choices?.[0]?.message || {};
+  entry.inTok = usage?.prompt_tokens || 0;
+  entry.outTok = usage?.completion_tokens || 0;
   return {
-    text: msg.content || '',
-    calls: (msg.tool_calls || []).map((c) => {
+    text,
+    calls: calls.filter(Boolean).map((c, i) => {
       let args = {};
-      try { args = JSON.parse(c.function.arguments || '{}'); } catch {}
-      return { id: c.id, name: c.function.name, args };
+      try { args = JSON.parse(c.argStr || '{}'); } catch {}
+      return { id: c.id || `call_${Date.now()}_${i}`, name: c.name, args };
     }),
     entry,
   };
 }
 
 // ---- Anthropic Messages API ----
-async function anthropic(p, system, history) {
+async function anthropic(p, system, history, on) {
   const messages = [];
   const push = (role, block) => {
     const last = messages[messages.length - 1];
@@ -78,28 +146,47 @@ async function anthropic(p, system, history) {
       for (const c of m.calls || []) push('assistant', { type: 'tool_use', id: c.id, name: c.name, input: c.args });
     } else if (m.role === 'tool') push('user', { type: 'tool_result', tool_use_id: m.id, content: m.text });
   }
-  const { json, entry } = await call(
+  let text = '', inTok = 0, outTok = 0;
+  const blocks = {};
+  const entry = await stream(
     `${p.base}/messages`,
     { 'x-api-key': p.key, 'anthropic-version': '2023-06-01' },
     {
       model: p.model,
       max_tokens: 8192,
+      stream: true,
       system,
       messages,
       tools: TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: schema(t) })),
+    },
+    (ev) => {
+      if (ev.type === 'message_start') inTok = ev.message?.usage?.input_tokens || 0;
+      else if (ev.type === 'message_delta') outTok = ev.usage?.output_tokens || outTok;
+      else if (ev.type === 'content_block_start' && ev.content_block?.type === 'tool_use')
+        blocks[ev.index] = { id: ev.content_block.id, name: ev.content_block.name, argStr: '' };
+      else if (ev.type === 'content_block_delta') {
+        const d = ev.delta;
+        if (d.type === 'text_delta') { text += d.text; on.text(d.text); }
+        else if (d.type === 'thinking_delta') on.think(d.thinking);
+        else if (d.type === 'input_json_delta' && blocks[ev.index]) blocks[ev.index].argStr += d.partial_json;
+      }
     }
   );
-  entry.inTok = json.usage?.input_tokens || 0;
-  entry.outTok = json.usage?.output_tokens || 0;
-  const blocks = json.content || [];
+  entry.inTok = inTok;
+  entry.outTok = outTok;
   return {
-    text: blocks.filter((b) => b.type === 'text').map((b) => b.text).join(''),
-    calls: blocks.filter((b) => b.type === 'tool_use').map((b) => ({ id: b.id, name: b.name, args: b.input || {} })),
+    text,
+    calls: Object.values(blocks).map((b) => {
+      let args = {};
+      try { args = JSON.parse(b.argStr || '{}'); } catch {}
+      return { id: b.id, name: b.name, args };
+    }),
     entry,
   };
 }
 
-export function chat(p, system, history) {
+export function chat(p, system, history, on = {}) {
   if (!p.key) throw new Error(`No API key for ${p.name}. Use /key <your-key> or set ${p.env}.`);
-  return p.kind === 'anthropic' ? anthropic(p, system, history) : openai(p, system, history);
+  const handlers = { text: on.text || (() => {}), think: on.think || (() => {}) };
+  return p.kind === 'anthropic' ? anthropic(p, system, history, handlers) : openai(p, system, history, handlers);
 }

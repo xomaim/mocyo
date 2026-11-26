@@ -3,7 +3,7 @@
 import readline from 'node:readline';
 import process from 'node:process';
 import * as config from '../src/config.js';
-import { chat, apiLog } from '../src/api.js';
+import { chat, apiLog, cancel } from '../src/api.js';
 import { byName } from '../src/tools.js';
 
 // ---------- tiny color helpers ----------
@@ -38,6 +38,11 @@ function showApi(e) {
 }
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });
+let busy = false;
+rl.on('SIGINT', () => {
+  if (busy && cancel()) return;
+  rl.close();
+});
 const ask = (q) => new Promise((r) => rl.question(q, r));
 
 async function approve(name, args) {
@@ -55,14 +60,29 @@ async function turn(input) {
   history.push({ role: 'user', text: input });
   const p = config.resolve(cfg);
   for (let step = 0; step < 25; step++) {
-    const stop = spinner(`thinking (${p.name}/${p.model})`);
+    let stop = spinner(`waiting for ${p.name}/${p.model}  (Ctrl+C to cancel)`);
+    let mode = null; // 'think' | 'text'
+    const first = () => { if (stop) { stop(); stop = null; } };
+    const on = {
+      think: (d) => { first(); if (mode !== 'think') { process.stdout.write(dim('\n  thinking… ')); mode = 'think'; } process.stdout.write(dim(d)); },
+      text: (d) => { first(); if (mode !== 'text') { process.stdout.write(mode ? '\n\n' : '\n'); mode = 'text'; } process.stdout.write(d); },
+    };
+    busy = true;
     let r;
-    try { r = await chat(p, SYSTEM(), history); }
-    catch (e) { stop(); if (apiLog.length) showApi(apiLog[apiLog.length - 1]); console.log(red('  ✗ ' + e.message)); history.pop(); return; }
-    stop();
+    try { r = await chat(p, SYSTEM(), history, on); }
+    catch (e) {
+      first(); busy = false;
+      if (mode) process.stdout.write('\n');
+      if (apiLog.length) showApi(apiLog[apiLog.length - 1]);
+      console.log(red('  ✗ ' + e.message));
+      while (history.length && history[history.length - 1].role !== 'user') history.pop();
+      history.pop();
+      return;
+    }
+    first(); busy = false;
+    if (mode) process.stdout.write('\n\n');
     showApi(r.entry);
     history.push({ role: 'assistant', text: r.text, calls: r.calls });
-    if (r.text) console.log('\n' + r.text.trim() + '\n');
     if (!r.calls.length) return;
 
     for (const call of r.calls) {

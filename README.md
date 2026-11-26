@@ -4,6 +4,7 @@ A lightweight AI coding agent for your terminal, like opencode.
 
 - **API-only.** Nothing runs on your machine except one small program. The model runs at the provider.
 - **Shows every API call.** After each request you see the status, host, time and token counts. `/api` lists all calls, and `/api 3` shows the full request and response JSON for call 3.
+- **Live replies.** Text appears word by word as the AI writes it. Ctrl+C cancels a slow reply, and a call that gets no response for 90 seconds stops on its own.
 - **Light on your PC.** No dependencies, a single small .exe, no background processes. It sits idle while it waits for you.
 
 ```
