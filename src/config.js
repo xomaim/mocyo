@@ -35,6 +35,8 @@ export function resolve(cfg) {
     base: cfg.baseUrl || p.base,
     model: cfg.model || p.model,
     key: cfg.keys[cfg.provider] || process.env[p.env] || '',
+    noTools: !!cfg.noTools,
+    noUsage: !!cfg.noUsage,
   };
 }
 

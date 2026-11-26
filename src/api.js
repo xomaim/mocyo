@@ -99,8 +99,8 @@ async function openai(p, system, history, on) {
       model: p.model,
       messages,
       stream: true,
-      stream_options: { include_usage: true },
-      tools: TOOLS.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: schema(t) } })),
+      ...(!p.noUsage && { stream_options: { include_usage: true } }),
+      ...(!p.noTools && { tools: TOOLS.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: schema(t) } })) }),
     },
     (ev) => {
       if (ev.usage) usage = ev.usage;
@@ -183,6 +183,28 @@ async function anthropic(p, system, history, on) {
     }),
     entry,
   };
+}
+
+// Quick probe used by /test: one request with a short timeout, returns status + time.
+export async function probe(p, { stream: st, tools }, ms = 30000) {
+  const t0 = Date.now();
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), ms);
+  const body = { model: p.model, messages: [{ role: 'user', content: 'Say hi in one word.' }], max_tokens: 20 };
+  if (st) body.stream = true;
+  if (tools) body.tools = TOOLS.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: schema(t) } }));
+  try {
+    const res = await fetch(`${p.base}/chat/completions`, {
+      method: 'POST', signal: ac.signal,
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${p.key}` },
+      body: JSON.stringify(body),
+    });
+    const head = Date.now() - t0;
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, head, ms: Date.now() - t0, text: text.slice(0, 200) };
+  } catch (e) {
+    return { ok: false, status: 0, ms: Date.now() - t0, text: ac.signal.aborted ? `no response in ${ms / 1000}s` : e.message };
+  } finally { clearTimeout(timer); }
 }
 
 export function chat(p, system, history, on = {}) {

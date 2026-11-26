@@ -3,7 +3,7 @@
 import readline from 'node:readline';
 import process from 'node:process';
 import * as config from '../src/config.js';
-import { chat, apiLog, cancel } from '../src/api.js';
+import { chat, apiLog, cancel, probe } from '../src/api.js';
 import { byName } from '../src/tools.js';
 
 // ---------- tiny color helpers ----------
@@ -111,6 +111,8 @@ ${bold('commands')}
   /base <url>        custom base URL (any OpenAI-compatible API), "/base reset" to clear
   /api [n]           show API call log, or full request/response of call n
   /auto              toggle auto-approve for edits & commands
+  /test              check which kinds of request your provider answers
+  /tools             toggle sending file tools (turn off if a model hangs)
   /clear             clear conversation
   /status            show current setup
   /exit              quit
@@ -119,7 +121,7 @@ ${bold('commands')}
 
 function status() {
   const p = config.resolve(cfg);
-  console.log(dim(`  provider ${p.name} · model ${p.model} · key ${p.key ? 'set' : red('missing')} · auto-approve ${cfg.autoApprove ? 'on' : 'off'}`));
+  console.log(dim(`  provider ${p.name} · model ${p.model} · key ${p.key ? 'set' : red('missing')} · auto-approve ${cfg.autoApprove ? 'on' : 'off'}${cfg.noTools ? ' · tools off' : ''}`));
 }
 
 function apiCmd(arg) {
@@ -138,6 +140,18 @@ function apiCmd(arg) {
   console.log(dim(`  total: ${tin} in / ${tout} out tokens · /api <n> for details`));
 }
 
+async function testCmd() {
+  const p = config.resolve(cfg);
+  if (p.kind !== 'openai') return console.log(dim('  /test is for OpenAI-style providers'));
+  console.log(dim(`  testing ${p.name}/${p.model} (up to 30s each)…`));
+  const cases = [['plain', {}], ['streaming', { stream: true }], ['with tools', { tools: true }], ['streaming + tools', { stream: true, tools: true }]];
+  for (const [label, opt] of cases) {
+    process.stdout.write(dim(`  ${label.padEnd(18)} `));
+    const r = await probe(p, opt);
+    console.log((r.ok ? green(`✓ ${r.status}`) : red(`✗ ${r.status || 'ERR'}`)) + dim(` ${(r.ms / 1000).toFixed(1)}s  ${r.ok ? '' : r.text}`));
+  }
+}
+
 async function command(line) {
   const [cmd, ...rest] = line.slice(1).split(' ');
   const arg = rest.join(' ').trim();
@@ -152,6 +166,8 @@ async function command(line) {
     case 'base': cfg.baseUrl = arg === 'reset' ? null : arg || null; config.save(cfg); return status();
     case 'api': return apiCmd(arg);
     case 'auto': cfg.autoApprove = !cfg.autoApprove; config.save(cfg); return status();
+    case 'test': return testCmd();
+    case 'tools': cfg.noTools = !cfg.noTools; config.save(cfg); return console.log(dim(`  file tools ${cfg.noTools ? red('off (chat only)') : green('on')}`));
     case 'clear': history.length = 0; return console.log(dim('  cleared'));
     case 'status': return status();
     default: console.log(red('  unknown command, try /help'));
